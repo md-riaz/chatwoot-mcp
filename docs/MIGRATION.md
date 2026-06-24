@@ -13,7 +13,7 @@ Python service:
 - writes PostgreSQL + pgvector
 - runs historical backfill
 
-### chatwoot-mcp-node
+### chatwoot-mcp
 
 Node/TypeScript service:
 - exposes MCP tools

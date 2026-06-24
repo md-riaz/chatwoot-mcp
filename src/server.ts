@@ -30,7 +30,7 @@ export async function runHttpServer(): Promise<void> {
 
   app.use(express.json({ limit: "4mb" }));
   app.get(`${base}/health`, (_req, res) => {
-    res.json({ status: "healthy", server: "chatwoot-mcp-node", basePath: base || "/" });
+    res.json({ status: "healthy", server: "chatwoot-mcp", basePath: base || "/" });
   });
 
   app.all(`${base}/mcp`, requireAuth, async (req, res) => {
@@ -66,7 +66,7 @@ export async function runHttpServer(): Promise<void> {
   });
 
   app.listen(config.port, () => {
-    console.error(`chatwoot-mcp-node listening on :${config.port}${base || ""}`);
+    console.error(`chatwoot-mcp listening on :${config.port}${base || ""}`);
     console.error(`Streamable HTTP: ${base}/mcp`);
     console.error(`Legacy SSE: ${base}/sse`);
   });

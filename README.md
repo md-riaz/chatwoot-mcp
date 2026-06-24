@@ -1,4 +1,4 @@
-# Chatwoot MCP Node
+# Chatwoot MCP
 
 Local Node/TypeScript MCP split for read-only Chatwoot analytics.
 
