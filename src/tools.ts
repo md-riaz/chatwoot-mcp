@@ -4,6 +4,7 @@ import { chatwootGet, extractAccounts, extractCollection } from "./chatwoot.js";
 import { config, reportTimezoneOffset } from "./config.js";
 import { dateWindowClause, reportTimestamp } from "./dates.js";
 import { queryOne, queryRows } from "./db.js";
+import { registerParityTools } from "./parityTools.js";
 
 function text(markdown: string) {
   return { content: [{ type: "text" as const, text: markdown }] };
@@ -296,6 +297,8 @@ export function createChatwootMcpServer(): McpServer {
       return text(out);
     }
   );
+
+  registerParityTools(server);
 
   return server;
 }

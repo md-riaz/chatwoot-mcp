@@ -6,6 +6,8 @@ export type AppConfig = {
   mcpApiKey?: string;
   chatwootBaseUrl?: string;
   chatwootApiToken?: string;
+  embeddingServiceUrl?: string;
+  embeddingApiKey?: string;
   reportTimezone: string;
   databaseUrl?: string;
   db: {
@@ -30,6 +32,8 @@ export const config: AppConfig = {
   mcpApiKey: process.env.MCP_API_KEY,
   chatwootBaseUrl: process.env.CHATWOOT_BASE_URL,
   chatwootApiToken: process.env.CHATWOOT_API_TOKEN,
+  embeddingServiceUrl: process.env.EMBEDDING_SERVICE_URL,
+  embeddingApiKey: process.env.EMBEDDING_API_KEY,
   reportTimezone: process.env.CHATWOOT_REPORT_TIMEZONE ?? "Asia/Dhaka",
   databaseUrl: process.env.DATABASE_URL,
   db: {

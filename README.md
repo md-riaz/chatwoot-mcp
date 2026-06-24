@@ -6,15 +6,16 @@ This service is intended to replace the MCP surface of the current Python combin
 
 ## Current Scope
 
-Ported local shadow tools:
-- `list_available_chatwoot_accounts`
-- `list_available_chatwoot_scope`
-- `get_cache_sync_status`
-- `get_resolved_conversation_volume_by_inbox`
-- `get_daily_resolved_conversation_volume`
-- `get_chatwoot_native_report`
+This repo has Node/TypeScript registrations for all 66 Python MCP tools from the previous combined server.
 
-Remaining tools are tracked in [docs/PORTING_CHECKLIST.md](docs/PORTING_CHECKLIST.md).
+Semantic/vector tools remain embedding-free in this repo. They call the split Python embedding service through:
+
+```env
+EMBEDDING_SERVICE_URL=http://127.0.0.1:8000
+EMBEDDING_API_KEY=YOUR_EMBEDDING_SERVICE_X_API_KEY
+```
+
+Tool parity notes are tracked in [docs/PORTING_CHECKLIST.md](docs/PORTING_CHECKLIST.md).
 
 ## Transports
 

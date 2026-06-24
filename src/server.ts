@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config.js";
 import { createChatwootMcpServer } from "./tools.js";
 
@@ -27,6 +28,7 @@ export async function runHttpServer(): Promise<void> {
   const app = express();
   const base = config.basePath;
   const sseTransports = new Map<string, SSEServerTransport>();
+  const httpTransports = new Map<string, StreamableHTTPServerTransport>();
 
   app.use(express.json({ limit: "4mb" }));
   app.get(`${base}/health`, (_req, res) => {
@@ -34,15 +36,33 @@ export async function runHttpServer(): Promise<void> {
   });
 
   app.all(`${base}/mcp`, requireAuth, async (req, res) => {
-    const server = createChatwootMcpServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID()
-    });
-    res.on("close", () => {
-      void transport.close();
-    });
-    await server.connect(transport);
+    const sessionId = req.header("mcp-session-id");
+    let transport = sessionId ? httpTransports.get(sessionId) : undefined;
+
+    if (!transport) {
+      const messages = Array.isArray(req.body) ? req.body : [req.body];
+      const isInit = req.method === "POST" && messages.some((message) => isInitializeRequest(message));
+      if (!isInit) {
+        res.status(400).json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Bad Request: Server not initialized" },
+          id: null
+        });
+        return;
+      }
+
+      const server = createChatwootMcpServer();
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID()
+      });
+      transport.onclose = () => {
+        if (transport?.sessionId) httpTransports.delete(transport.sessionId);
+      };
+      await server.connect(transport);
+    }
+
     await transport.handleRequest(req, res, req.body);
+    if (transport.sessionId) httpTransports.set(transport.sessionId, transport);
   });
 
   app.get(`${base}/sse`, requireAuth, async (req, res) => {
