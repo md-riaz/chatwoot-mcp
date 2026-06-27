@@ -6,6 +6,23 @@ import { dateWindowClause, reportTimestamp } from "./dates.js";
 import { queryOne, queryRows } from "./db.js";
 import { registerParityTools } from "./parityTools.js";
 
+type ConversationSummaryRow = {
+  account_id: number;
+  conversation_id: number;
+  contact_name: string | null;
+  contact_email: string | null;
+  inbox_id: number | null;
+  inbox_name: string | null;
+  channel_type: string | null;
+  agent_name: string | null;
+  labels: string[] | null;
+  resolved_by: string | null;
+  chatwoot_created_at: Date | string | null;
+  last_activity_at: Date | string | null;
+  resolved_at: Date | string | null;
+  transcript: string | null;
+};
+
 function text(markdown: string) {
   return { content: [{ type: "text" as const, text: markdown }] };
 }
@@ -20,6 +37,30 @@ function numberValue(value: unknown): number {
   if (typeof value === "bigint") return Number(value);
   if (typeof value === "string") return Number(value);
   return 0;
+}
+
+function compactText(value: unknown, maxChars = 700): string {
+  const output = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (output.length <= maxChars) return output;
+  return `${output.slice(0, maxChars - 1).trimEnd()}...`;
+}
+
+function formatDate(value: Date | string | null): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function summarizeTranscript(transcript: string | null): string {
+  if (!transcript) return "No cached transcript chunk available.";
+  const lines = transcript
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^conversation\s*#/i.test(line));
+  return compactText(lines.join(" "), 900) || "No readable transcript text available.";
 }
 
 export function createChatwootMcpServer(): McpServer {
@@ -295,6 +336,158 @@ export function createChatwootMcpServer(): McpServer {
       }
       out += `\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
       return text(out);
+    }
+  );
+
+  server.registerTool(
+    "get_recent_resolved_conversation_summaries_by_inbox",
+    {
+      title: "Get recent resolved conversation summaries by inbox",
+      description:
+        "Return cached resolved conversations from the last N days grouped by account and inbox, including each Chatwoot conversation ID and a compact transcript-based summary. Use this for prompts like 'last 7 days all conversations summary per inbox', 'summarize conversations with IDs by inbox', or recent resolved chat audit. This uses cached resolved conversations; do not use for currently open/live backlog unless user explicitly asks for live/open data. If user mentions account, brand, inbox, product, or channel, call list_available_chatwoot_scope first, then pass selected account_id and/or inbox_ids.",
+      inputSchema: {
+        days: z.number().int().min(1).max(366).describe("Number of days back from now to include. Required because this tool is specifically for last N days requests."),
+        account_id: z.number().int().optional().describe("Optional Chatwoot account ID selected after list_available_chatwoot_scope."),
+        inbox_ids: z.array(z.number().int()).optional().describe("Optional inbox IDs selected after list_available_chatwoot_scope. For a brand, include all matching inboxes such as Messenger, WhatsApp, and Live Chat."),
+        max_conversations_per_inbox: z.number().int().min(1).max(500).optional().describe("Maximum conversations returned per inbox. Default 100."),
+        include_transcript_excerpt: z.boolean().optional().describe("Include compact transcript excerpt used for summary. Default false.")
+      }
+    },
+    async ({
+      days,
+      account_id,
+      inbox_ids,
+      max_conversations_per_inbox,
+      include_transcript_excerpt
+    }: {
+      days: number;
+      account_id?: number;
+      inbox_ids?: number[];
+      max_conversations_per_inbox?: number;
+      include_transcript_excerpt?: boolean;
+    }) => {
+      const params: unknown[] = [days];
+      const filters = ["c.resolved_at IS NOT NULL", "c.resolved_at >= NOW() - ($1::int * INTERVAL '1 day')"];
+
+      if (typeof account_id === "number") {
+        params.push(account_id);
+        filters.push(`c.account_id = $${params.length}::bigint`);
+      }
+
+      if (inbox_ids && inbox_ids.length > 0) {
+        params.push(inbox_ids);
+        filters.push(`c.inbox_id = ANY($${params.length}::bigint[])`);
+      }
+
+      params.push(max_conversations_per_inbox ?? 100);
+      const limitParam = params.length;
+
+      const rows = await queryRows<ConversationSummaryRow>(
+        `
+          WITH conversations_with_text AS (
+            SELECT
+              c.account_id,
+              c.id AS conversation_id,
+              c.contact_name,
+              c.contact_email,
+              c.inbox_id,
+              c.inbox_name,
+              c.channel_type,
+              c.agent_name,
+              c.labels,
+              c.resolved_by,
+              c.chatwoot_created_at,
+              c.last_activity_at,
+              c.resolved_at,
+              STRING_AGG(cc.content, E'\\n\\n' ORDER BY cc.chunk_index) AS transcript
+            FROM conversations c
+            LEFT JOIN conversation_chunks cc
+              ON cc.account_id = c.account_id
+             AND cc.conversation_id = c.id
+            WHERE ${filters.join(" AND ")}
+            GROUP BY
+              c.account_id,
+              c.id,
+              c.contact_name,
+              c.contact_email,
+              c.inbox_id,
+              c.inbox_name,
+              c.channel_type,
+              c.agent_name,
+              c.labels,
+              c.resolved_by,
+              c.chatwoot_created_at,
+              c.last_activity_at,
+              c.resolved_at
+          ),
+          ranked AS (
+            SELECT
+              *,
+              ROW_NUMBER() OVER (
+                PARTITION BY account_id, inbox_id
+                ORDER BY resolved_at DESC NULLS LAST, conversation_id DESC
+              ) AS inbox_rank
+            FROM conversations_with_text
+          )
+          SELECT *
+          FROM ranked
+          WHERE inbox_rank <= $${limitParam}::int
+          ORDER BY account_id ASC, inbox_name ASC NULLS LAST, inbox_id ASC NULLS LAST, resolved_at DESC NULLS LAST;
+        `,
+        params
+      );
+
+      const grouped = new Map<string, {
+        account_id: number;
+        inbox_id: number | null;
+        inbox_name: string;
+        channel_type: string | null;
+        conversation_count: number;
+        conversations: unknown[];
+      }>();
+
+      for (const row of rows) {
+        const key = `${row.account_id}:${row.inbox_id ?? "unknown"}`;
+        const inbox = grouped.get(key) ?? {
+          account_id: row.account_id,
+          inbox_id: row.inbox_id,
+          inbox_name: row.inbox_name ?? "Unknown inbox",
+          channel_type: row.channel_type,
+          conversation_count: 0,
+          conversations: []
+        };
+        inbox.conversation_count += 1;
+        inbox.conversations.push({
+          conversation_id: row.conversation_id,
+          contact_name: row.contact_name,
+          contact_email: row.contact_email,
+          agent_name: row.agent_name,
+          resolved_by: row.resolved_by,
+          labels: row.labels ?? [],
+          chatwoot_created_at: formatDate(row.chatwoot_created_at),
+          last_activity_at: formatDate(row.last_activity_at),
+          resolved_at: formatDate(row.resolved_at),
+          summary: summarizeTranscript(row.transcript),
+          ...(include_transcript_excerpt ? { transcript_excerpt: compactText(row.transcript, 1600) } : {})
+        });
+        grouped.set(key, inbox);
+      }
+
+      return text(JSON.stringify({
+        source: "cached_resolved_conversations",
+        window: {
+          days,
+          from: `now - ${days} days`,
+          to: "now"
+        },
+        filters: {
+          account_id: account_id ?? null,
+          inbox_ids: inbox_ids ?? null
+        },
+        total_conversations: rows.length,
+        inbox_count: grouped.size,
+        inboxes: Array.from(grouped.values())
+      }, null, 2));
     }
   );
 

@@ -6,7 +6,9 @@ This service is intended to replace the MCP surface of the current Python combin
 
 ## Current Scope
 
-This repo has Node/TypeScript registrations for all 66 Python MCP tools from the previous combined server.
+This repo has Node/TypeScript registrations for all 66 Python MCP tools from the previous combined server, plus Node-first read-only tools for clearer agent workflows.
+
+For recent conversation audit requests like "last 7 days all conversations summary per inbox", agents should use `get_recent_resolved_conversation_summaries_by_inbox`. It returns cached resolved conversations grouped by account/inbox with each Chatwoot conversation ID and a compact transcript summary. If the user names an account, brand, inbox, product, or channel, call `list_available_chatwoot_scope` first and pass selected `account_id` and/or `inbox_ids`.
 
 Semantic/vector tools remain embedding-free in this repo. They call the split Python embedding service through:
 
